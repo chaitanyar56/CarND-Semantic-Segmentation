@@ -4,14 +4,12 @@ import helper
 import warnings
 from distutils.version import LooseVersion
 import project_tests as tests
+import time
 
 
 # Check TensorFlow Version
 assert LooseVersion(tf.__version__) >= LooseVersion('1.0'), 'Please use TensorFlow version 1.0 or newer.  You are using {}'.format(tf.__version__)
 print('TensorFlow Version: {}'.format(tf.__version__))
-
-#config = tf.ConfigProto()
-#config.gpu_options.allocator_type = 'BFC'
 
 # Check for a GPU
 if not tf.test.gpu_device_name():
@@ -60,28 +58,30 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :return: The Tensor for the last layer of output
     """
     # TODO: Implement function
-    conv_1x1 = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding = 'same',
+    layer7a_out = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding = 'same',
                                 kernel_regularizer = tf.contrib.layers.l2_regularizer(1e-3))
-    layer4a_in1 =  tf.layers.conv2d_transpose(conv_1x1, num_classes, 4, 2, padding = 'same',
+
+    layer4a_1 =  tf.layers.conv2d_transpose(layer7a_out, num_classes, 4, (2,2), padding = 'same',
                                          kernel_regularizer = tf.contrib.layers.l2_regularizer(1e-3))
 
     # 1x1 convolution of vgg layer 4
-    layer4a_in2 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1,
+    layer4a_2 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1,
                                    padding= 'same',
                                    kernel_regularizer= tf.contrib.layers.l2_regularizer(1e-3))
     # skip connection (element-wise addition)
-    layer4a_out = tf.add(layer4a_in1, layer4a_in2)
+    layer4a_out = tf.add(layer4a_1, layer4a_2)
+
     # upsample
-    layer3a_in1 = tf.layers.conv2d_transpose(layer4a_out, num_classes, 4,
+    layer3a_1 = tf.layers.conv2d_transpose(layer4a_out, num_classes, 4,
                                              strides= (2, 2),
                                              padding= 'same',
                                              kernel_regularizer= tf.contrib.layers.l2_regularizer(1e-3))
     # 1x1 convolution of vgg layer 3
-    layer3a_in2 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1,
+    layer3a_2 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1,
                                    padding= 'same',
                                    kernel_regularizer= tf.contrib.layers.l2_regularizer(1e-3))
     # skip connection (element-wise addition)
-    layer3a_out = tf.add(layer3a_in1, layer3a_in2)
+    layer3a_out = tf.add(layer3a_1, layer3a_2)
     # upsample
     output = tf.layers.conv2d_transpose(layer3a_out, num_classes, 16,
                                                strides= (8, 8),
@@ -135,14 +135,20 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
 
     sess.run(tf.global_variables_initializer())
 
-    #print()
-
     for epoch in range(epochs):
+        #save log_loss
+        loss_epoch = 0
+        count  = 0
         for image, label in get_batches_fn(batch_size):
-            _, loss = sess.run([train_op, cross_entropy_loss], feed_dict = {input_image: image, correct_label: label})
+            _, loss = sess.run([train_op, cross_entropy_loss], feed_dict = {input_image: image, correct_label: label, keep_prob: 0.5, learning_rate: 0.0009})
 
-            print("Loss: = {:.3f}".format(loss))
-            #print()
+            loss_epoch += loss
+            count += 1
+
+        loss_epoch = loss_epoch / count
+
+        print("{:.3f}".format(loss_epoch))
+
 
 tests.test_train_nn(train_nn)
 
@@ -161,7 +167,8 @@ def run():
     # You'll need a GPU with at least 10 teraFLOPS to train on.
     #  https://www.cityscapes-dataset.com/
 
-    with tf.Session(config = config) as sess:
+    #include config=tf.ConfigProto(device_count={'GPU': 0}) in tf.Sesion to run on CPU
+    with tf.Session() as sess:
         # Path to vgg model
         vgg_path = os.path.join(data_dir, 'vgg')
         # Create function to get batches
@@ -195,4 +202,10 @@ def run():
 
 
 if __name__ == '__main__':
+    #measure training time
+    start = time.time()
+
     run()
+
+    end = time.time()
+    print("Time to Train the network = {:.5f}".format(end-start))
